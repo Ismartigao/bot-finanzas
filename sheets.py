@@ -386,6 +386,68 @@ def list_positions() -> list[dict]:
     return result
 
 
+def refresh_fund_prices() -> dict:
+    """
+    Recorre las posiciones de INVERSIONES y actualiza la columna F (precio actual)
+    para los fondos identificados por ISIN consultando Morningstar.es.
+
+    No toca posiciones cuyo ticker tenga formato MERCADO:TICKER (esos los gestiona
+    GOOGLEFINANCE en la propia hoja) ni tickers no reconocidos.
+
+    Devuelve {"updated": [...], "skipped": [...], "failed": [...]}.
+    """
+    import prices  # import local: evita cargar httpx hasta que se use
+
+    ws = _inversiones()
+    rng = ws.get(f"A{INV_POS_START}:F{INV_POS_END}")
+
+    updated = []
+    skipped = []
+    failed = []
+
+    for i, r in enumerate(rng):
+        r = (r or []) + [""] * (6 - len(r or []))
+        activo = (r[0] or "").strip()
+        ticker = (r[2] or "").strip()
+        if not activo:
+            continue
+
+        # ETFs/cripto/acciones con formato MERCADO:TICKER -> los actualiza GOOGLEFINANCE solo
+        if ":" in ticker:
+            skipped.append({"activo": activo, "razon": "auto (GOOGLEFINANCE)"})
+            continue
+
+        # Fondos indexados con ISIN -> consultar Morningstar
+        if prices.looks_like_isin(ticker):
+            nav = prices.fetch_fund_nav(ticker)
+            if nav is not None and nav > 0:
+                row_num = INV_POS_START + i
+                ws.update(
+                    f"F{row_num}:F{row_num}",
+                    [[float(nav)]],
+                    value_input_option="USER_ENTERED",
+                )
+                updated.append({
+                    "activo": activo,
+                    "isin": ticker,
+                    "precio": float(nav),
+                    "row": row_num,
+                })
+            else:
+                failed.append({
+                    "activo": activo,
+                    "isin": ticker,
+                    "razon": "no encontrado en Morningstar",
+                })
+        else:
+            skipped.append({
+                "activo": activo,
+                "razon": f"ticker '{ticker}' no reconocido (no es ISIN ni MERCADO:TICKER)",
+            })
+
+    return {"updated": updated, "skipped": skipped, "failed": failed}
+
+
 def update_price(activo: str, precio: float) -> dict:
     """
     Sobreescribe la celda F (precio actual) de la posicion cuyo nombre coincida

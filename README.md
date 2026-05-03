@@ -197,7 +197,8 @@ Si quieres probarlo en tu ordenador antes de subirlo a Railway:
 | `/resumen` | KPIs del mes actual (ingresos, gastos, balance, tasa ahorro) |
 | `/huchas` | Progreso actual de las huchas |
 | `/cartera` | Posiciones actuales de inversión (participaciones, precio medio, G/P) |
-| `/precio <activo> <valor>` | Actualiza el precio actual de un activo. Útil para fondos indexados. Ej: `/precio Vanguard Global 195.42` |
+| `/actualizar` | Refresca el precio de todos tus fondos indexados consultando Morningstar.es por ISIN. Sin parámetros. |
+| `/precio <activo> <valor>` | Actualiza a mano el precio de un activo concreto. Ej: `/precio Vanguard Global 195.42` |
 | `/categoria <nombre>` | Total gastado en esa categoría este mes. Ej: `/categoria aliment` |
 | `/ultimos` | Últimos 10 movimientos registrados |
 | `/deshacer` | Borra el último movimiento añadido por el bot |
@@ -248,7 +249,11 @@ La fórmula que vive en cada celda F5:F19 es:
 ```
 
 Si `GOOGLEFINANCE` no encuentra el ticker (típico en fondos indexados), la
-celda queda vacía y debes refrescar el precio manualmente con `/precio`.
+celda queda vacía y puedes refrescar el precio:
+
+- **`/actualizar`** (recomendado): consulta Morningstar.es para todos los
+  fondos cuyo ticker (columna C) sea un ISIN, y los actualiza de golpe.
+- **`/precio NOMBRE VALOR`**: si Morningstar no encuentra alguno, lo metes a mano.
 
 ### Si tu Sheet ya existe (caso real)
 

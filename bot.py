@@ -69,8 +69,9 @@ async def cmd_start(update: Update, _ctx: ContextTypes.DEFAULT_TYPE):
         "/resumen - KPIs del mes\n"
         "/huchas - progreso de huchas\n"
         "/cartera - posiciones actuales de inversion\n"
-        "/precio <activo> <valor> - actualizar precio actual de un activo\n"
-        "  (ETFs/cripto se actualizan solos via GOOGLEFINANCE; usa esto para fondos)\n"
+        "/actualizar - refresca precio de TODOS los fondos indexados (Morningstar)\n"
+        "/precio <activo> <valor> - actualizar precio de un activo concreto a mano\n"
+        "  (ETFs/cripto se actualizan solos via GOOGLEFINANCE)\n"
         "/categoria <nombre> - gasto del mes en esa categoria\n"
         "/ultimos - ultimos 10 movimientos\n"
         "/deshacer - borra el ultimo movimiento del TRACKER\n"
@@ -178,6 +179,44 @@ async def cmd_ultimos(update: Update, _ctx: ContextTypes.DEFAULT_TYPE):
         tipo = r["tipo"][:3].upper()
         lines.append(f"{r['fecha']} [{tipo}] {r['descripcion'] or r['categoria']}: {r['importe']}")
     await update.message.reply_text("\n".join(lines))
+
+
+async def cmd_actualizar(update: Update, _ctx: ContextTypes.DEFAULT_TYPE):
+    """Refresca el precio de los fondos indexados (por ISIN) consultando Morningstar.es.
+    No hace falta pasar argumentos: actualiza todos los activos de la hoja INVERSIONES."""
+    if not _is_authorized(update):
+        return await _reject(update)
+    aviso = await update.message.reply_text(
+        "Buscando precios en Morningstar... esto puede tardar 30-60s."
+    )
+    await update.message.chat.send_action(constants.ChatAction.TYPING)
+    try:
+        res = await asyncio.to_thread(sheets.refresh_fund_prices)
+    except Exception as e:
+        log.exception("Error en /actualizar")
+        return await aviso.edit_text(f"Error: {e}")
+
+    lines: list[str] = []
+    if res["updated"]:
+        lines.append("Actualizados:")
+        for u in res["updated"]:
+            lines.append(f"  ✓ {u['activo']}: {_fmt_eur(u['precio'])}")
+    if res["skipped"]:
+        lines.append("")
+        lines.append("Sin tocar (auto via GOOGLEFINANCE u otros):")
+        for s in res["skipped"]:
+            lines.append(f"  • {s['activo']} — {s['razon']}")
+    if res["failed"]:
+        lines.append("")
+        lines.append("No encontrados en Morningstar:")
+        for f in res["failed"]:
+            isin = f.get("isin", "")
+            lines.append(f"  ✗ {f['activo']} ({isin})")
+        lines.append("  (puedes ponerlos manualmente con /precio NOMBRE VALOR)")
+    if not lines:
+        lines = ["No hay posiciones en INVERSIONES."]
+
+    await aviso.edit_text("\n".join(lines))
 
 
 async def cmd_precio(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
@@ -458,6 +497,7 @@ def main():
     app.add_handler(CommandHandler("huchas", cmd_huchas))
     app.add_handler(CommandHandler("cartera", cmd_cartera))
     app.add_handler(CommandHandler("precio", cmd_precio))
+    app.add_handler(CommandHandler("actualizar", cmd_actualizar))
     app.add_handler(CommandHandler("categoria", cmd_categoria))
     app.add_handler(CommandHandler("ultimos", cmd_ultimos))
     app.add_handler(CommandHandler("deshacer", cmd_deshacer))
