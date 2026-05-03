@@ -197,6 +197,7 @@ Si quieres probarlo en tu ordenador antes de subirlo a Railway:
 | `/resumen` | KPIs del mes actual (ingresos, gastos, balance, tasa ahorro) |
 | `/huchas` | Progreso actual de las huchas |
 | `/cartera` | Posiciones actuales de inversión (participaciones, precio medio, G/P) |
+| `/precio <activo> <valor>` | Actualiza el precio actual de un activo. Útil para fondos indexados. Ej: `/precio Vanguard Global 195.42` |
 | `/categoria <nombre>` | Total gastado en esa categoría este mes. Ej: `/categoria aliment` |
 | `/ultimos` | Últimos 10 movimientos registrados |
 | `/deshacer` | Borra el último movimiento añadido por el bot |
@@ -221,6 +222,52 @@ Además:
 | `aporte mensual 10 participaciones MSCI World a 95` | Actualiza posición y precio medio |
 | `cena con amigos 38 euros con tarjeta de crédito` | GASTO 38€, Restaurantes, Tarjeta crédito |
 | `repostaje coche 62` | GASTO 62€, Transporte (gasolina/parking) |
+
+---
+
+## Auto-actualización de precios de inversiones
+
+La columna **F (Precio actual)** de la hoja `INVERSIONES` se actualiza
+automáticamente para los activos cotizados gracias a `GOOGLEFINANCE`. Para
+fondos indexados (que no cotizan en mercado abierto) se usa el comando
+`/precio` desde Telegram.
+
+### Convención de tickers en la columna C
+
+| Tipo de activo | Formato del ticker | Ejemplo |
+|----------------|--------------------|---------|
+| ETF cotizado | `MERCADO:TICKER` | `AMS:IWDA`, `NASDAQ:VOO`, `BME:LYX` |
+| Acción | `MERCADO:TICKER` | `BME:SAN`, `NASDAQ:AAPL` |
+| Cripto | `CRIPTO+EUR` (la celda B debe ser "Cripto") | `BTCEUR`, `ETHEUR` |
+| Fondo indexado | ISIN o nombre que reconozcas | `IE00B4L5Y983` |
+
+La fórmula que vive en cada celda F5:F19 es:
+
+```
+=IFERROR(IF(B5="Cripto", GOOGLEFINANCE("CURRENCY:"&C5), GOOGLEFINANCE(C5)), "")
+```
+
+Si `GOOGLEFINANCE` no encuentra el ticker (típico en fondos indexados), la
+celda queda vacía y debes refrescar el precio manualmente con `/precio`.
+
+### Si tu Sheet ya existe (caso real)
+
+Pega esta fórmula en F5 y arrastra (o copia/pega) hasta F19:
+
+```
+=IFERROR(IF(B5="Cripto", GOOGLEFINANCE("CURRENCY:"&C5), GOOGLEFINANCE(C5)), "")
+```
+
+Después, asegúrate de que la columna C tiene el formato correcto para cada
+activo cotizado.
+
+### Importante
+
+- El bot **no machaca** la fórmula al registrar nuevas compras (solo escribe
+  participaciones y precio medio en D-E). Por tanto la fórmula se mantiene.
+- El comando `/precio Nombre 88,50` **sí sobreescribe** la fórmula con el
+  valor numérico (este es el comportamiento que queremos para fondos).
+- Google refresca `GOOGLEFINANCE` cada 15-20 min.
 
 ---
 

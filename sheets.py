@@ -271,12 +271,13 @@ def append_investment(data: dict) -> dict:
     # 1. Buscar posicion existente
     inv_row = _find_position_by_name(ws, activo)
     if inv_row is not None:
-        # Actualizar: leer D (participaciones) y E (precio medio)
-        current = ws.get(f"D{inv_row}:F{inv_row}")
+        # Actualizar: leer D (participaciones) y E (precio medio).
+        # NO tocamos F (precio actual) para no machacar la formula GOOGLEFINANCE.
+        current = ws.get(f"D{inv_row}:E{inv_row}")
         cur_part = 0.0
         cur_pmedio = 0.0
         if current and current[0]:
-            fila = current[0] + [""] * (3 - len(current[0]))
+            fila = current[0] + [""] * (2 - len(current[0]))
             cur_part = _parse_num(fila[0])
             cur_pmedio = _parse_num(fila[1])
         nuevas_part = cur_part + cantidad
@@ -285,13 +286,14 @@ def append_investment(data: dict) -> dict:
         else:
             nuevo_pmedio = precio
         ws.update(
-            f"D{inv_row}:F{inv_row}",
-            [[nuevas_part, round(nuevo_pmedio, 4), precio]],
+            f"D{inv_row}:E{inv_row}",
+            [[nuevas_part, round(nuevo_pmedio, 4)]],
             value_input_option="USER_ENTERED",
         )
         accion = "actualizada"
     else:
-        # Crear nueva posicion en primera fila vacia
+        # Crear nueva posicion en primera fila vacia.
+        # Se escriben A-E (sin F, para preservar la formula GOOGLEFINANCE de la celda).
         inv_row = _find_first_empty_inv_row(ws)
         if inv_row is None:
             raise RuntimeError(
@@ -300,10 +302,11 @@ def append_investment(data: dict) -> dict:
         tipo_activo = data.get("tipo_activo", "") or "ETF"
         ticker = data.get("ticker", "")
         broker = data.get("broker", "")
-        # A-F: datos basicos; G-K tienen formulas prerrellenadas; L-M: broker + fecha 1a compra
+        # A-E: datos basicos; F: queda intacta (formula GOOGLEFINANCE);
+        # G-K: formulas prerrellenadas; L-M: broker + fecha 1a compra.
         ws.update(
-            f"A{inv_row}:F{inv_row}",
-            [[activo, tipo_activo, ticker, cantidad, precio, precio]],
+            f"A{inv_row}:E{inv_row}",
+            [[activo, tipo_activo, ticker, cantidad, precio]],
             value_input_option="USER_ENTERED",
         )
         ws.update(
@@ -381,6 +384,40 @@ def list_positions() -> list[dict]:
             "broker": r[11],
         })
     return result
+
+
+def update_price(activo: str, precio: float) -> dict:
+    """
+    Sobreescribe la celda F (precio actual) de la posicion cuyo nombre coincida
+    parcialmente con `activo`. Sustituye cualquier formula previa por el valor numerico.
+    Devuelve {"found": bool, "row": int, "activo": str, "precio_anterior": float, "precio_nuevo": float}.
+    """
+    ws = _inversiones()
+    row = _find_position_by_name(ws, activo)
+    if row is None:
+        return {"found": False}
+
+    # Leer el valor previo (puede ser un numero, una formula resuelta o vacio)
+    prev_cells = ws.get(f"A{row}:F{row}")
+    prev_activo = ""
+    prev_precio = 0.0
+    if prev_cells and prev_cells[0]:
+        fila = prev_cells[0] + [""] * (6 - len(prev_cells[0]))
+        prev_activo = fila[0]
+        prev_precio = _parse_num(fila[5])
+
+    ws.update(
+        f"F{row}:F{row}",
+        [[float(precio)]],
+        value_input_option="USER_ENTERED",
+    )
+    return {
+        "found": True,
+        "row": row,
+        "activo": prev_activo,
+        "precio_anterior": prev_precio,
+        "precio_nuevo": float(precio),
+    }
 
 
 def huchas_summary() -> list[dict]:

@@ -69,6 +69,8 @@ async def cmd_start(update: Update, _ctx: ContextTypes.DEFAULT_TYPE):
         "/resumen - KPIs del mes\n"
         "/huchas - progreso de huchas\n"
         "/cartera - posiciones actuales de inversion\n"
+        "/precio <activo> <valor> - actualizar precio actual de un activo\n"
+        "  (ETFs/cripto se actualizan solos via GOOGLEFINANCE; usa esto para fondos)\n"
         "/categoria <nombre> - gasto del mes en esa categoria\n"
         "/ultimos - ultimos 10 movimientos\n"
         "/deshacer - borra el ultimo movimiento del TRACKER\n"
@@ -176,6 +178,55 @@ async def cmd_ultimos(update: Update, _ctx: ContextTypes.DEFAULT_TYPE):
         tipo = r["tipo"][:3].upper()
         lines.append(f"{r['fecha']} [{tipo}] {r['descripcion'] or r['categoria']}: {r['importe']}")
     await update.message.reply_text("\n".join(lines))
+
+
+async def cmd_precio(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """Actualiza el precio actual de una posicion: /precio <nombre> <valor>."""
+    if not _is_authorized(update):
+        return await _reject(update)
+    if not ctx.args or len(ctx.args) < 2:
+        return await update.message.reply_text(
+            "Uso: /precio <nombre parcial> <valor>\n"
+            "Ejemplo: /precio Vanguard Global 195.42\n"
+            "         /precio IWDA 88,50"
+        )
+
+    # El ULTIMO token es el precio; el resto es el nombre.
+    precio_str = ctx.args[-1].replace(",", ".").replace("€", "").strip()
+    try:
+        precio = float(precio_str)
+    except ValueError:
+        return await update.message.reply_text(
+            f"No entiendo el precio '{ctx.args[-1]}'. Debe ser un numero."
+        )
+    if precio <= 0:
+        return await update.message.reply_text("El precio debe ser positivo.")
+
+    nombre = " ".join(ctx.args[:-1]).strip()
+    if not nombre:
+        return await update.message.reply_text("Falta el nombre del activo.")
+
+    await update.message.chat.send_action(constants.ChatAction.TYPING)
+    try:
+        res = await asyncio.to_thread(sheets.update_price, nombre, precio)
+    except Exception as e:
+        log.exception("Error actualizando precio")
+        return await update.message.reply_text(f"Error: {e}")
+
+    if not res.get("found"):
+        return await update.message.reply_text(
+            f"No encontre ninguna posicion que coincida con '{nombre}'.\n"
+            f"Usa /cartera para ver los nombres exactos."
+        )
+
+    prev = res.get("precio_anterior", 0)
+    msg = (
+        f"Precio actualizado: {res['activo']} (fila {res['row']})\n"
+        f"  Nuevo:    {_fmt_eur(res['precio_nuevo'])}"
+    )
+    if prev:
+        msg += f"\n  Anterior: {_fmt_eur(prev)}"
+    await update.message.reply_text(msg)
 
 
 async def cmd_cartera(update: Update, _ctx: ContextTypes.DEFAULT_TYPE):
@@ -406,6 +457,7 @@ def main():
     app.add_handler(CommandHandler("resumen", cmd_resumen))
     app.add_handler(CommandHandler("huchas", cmd_huchas))
     app.add_handler(CommandHandler("cartera", cmd_cartera))
+    app.add_handler(CommandHandler("precio", cmd_precio))
     app.add_handler(CommandHandler("categoria", cmd_categoria))
     app.add_handler(CommandHandler("ultimos", cmd_ultimos))
     app.add_handler(CommandHandler("deshacer", cmd_deshacer))
