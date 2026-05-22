@@ -1,13 +1,14 @@
-"""Obtiene NAVs de fondos indexados desde Morningstar.es por ISIN.
+"""Obtiene NAVs de fondos indexados y ETFs por ISIN.
 
-GOOGLEFINANCE no soporta fondos indexados (no cotizan en mercado abierto),
-solo tienen NAV diario. Aqui hacemos scraping ligero de Morningstar.es,
-que publica el NAV de la mayoria de fondos europeos por ISIN.
+Estrategia: probar varias fuentes en cascada hasta que una devuelva un precio.
 
-NOTA: si Morningstar cambia el HTML de sus paginas, habra que ajustar
-los patrones regex. Es lo que hay con el scraping.
+Fuentes (orden):
+  1. FT.com (Financial Times) — tearsheet publico con ISIN, robusto.
+  2. Morningstar.es — autocomplete + snapshot por MS_ID.
+  3. Yahoo Finance — ultimo recurso para ETFs con sufijo de mercado.
+
+Si ninguna funciona, devuelve None y el usuario lo pone con /precio a mano.
 """
-import json
 import logging
 import re
 from typing import Optional
@@ -23,13 +24,14 @@ _HEADERS = {
     ),
     "Accept-Language": "es-ES,es;q=0.9,en;q=0.8",
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Referer": "https://www.google.com/",
 }
 
 _TIMEOUT = httpx.Timeout(20.0, connect=10.0)
 
 
 def looks_like_isin(s: str) -> bool:
-    """Un ISIN tiene 12 caracteres alfanumericos y empieza por 2 letras."""
+    """ISIN: 12 caracteres, empieza con 2 letras."""
     if not s:
         return False
     s = s.strip().upper()
@@ -39,84 +41,161 @@ def looks_like_isin(s: str) -> bool:
 
 
 def fetch_fund_nav(isin: str) -> Optional[float]:
-    """
-    Devuelve el NAV (precio actual) de un fondo en EUR, buscando por ISIN.
-    Devuelve None si no se encuentra o si Morningstar bloquea la peticion.
+    """Devuelve el precio actual en EUR de un fondo/ETF dado su ISIN.
+
+    Prueba varias fuentes en orden. Devuelve None si todas fallan.
     """
     isin = (isin or "").strip().upper()
     if not looks_like_isin(isin):
         return None
 
-    try:
-        with httpx.Client(timeout=_TIMEOUT, follow_redirects=True, headers=_HEADERS) as client:
-            # Paso 1: buscar por ISIN. La pagina suele redirigir directo al snapshot
-            # del fondo si solo hay una coincidencia.
-            search_url = (
-                f"https://www.morningstar.es/es/funds/SecuritySearchResults.aspx"
-                f"?search={isin}&type="
-            )
-            r = client.get(search_url)
-            html = r.text
-
-            # Si no estamos en snapshot, buscar el primer link de resultados.
-            if "snapshot.aspx" not in str(r.url):
-                m = re.search(
-                    r'href="([^"]*?/funds/snapshot/snapshot\.aspx\?id=[^"&]+[^"]*)"',
-                    html,
-                )
-                if not m:
-                    log.warning(f"Morningstar: no hay resultados para {isin}")
-                    return None
-                snapshot_path = m.group(1)
-                if snapshot_path.startswith("/"):
-                    snapshot_url = "https://www.morningstar.es" + snapshot_path
-                elif snapshot_path.startswith("http"):
-                    snapshot_url = snapshot_path
-                else:
-                    snapshot_url = "https://www.morningstar.es/" + snapshot_path
-                r = client.get(snapshot_url)
-                html = r.text
-
-            return _parse_nav(html)
-    except Exception as e:
-        log.warning(f"Morningstar fetch failed para {isin}: {e}")
-        return None
-
-
-def _parse_nav(html: str) -> Optional[float]:
-    """Extrae el NAV del HTML de la pagina snapshot de Morningstar.es.
-
-    Probamos varios patrones porque la estructura cambia segun el tipo de fondo.
-    """
-    # Patron 1: bloque "VL" (Valor Liquidativo) tipico
-    # <td class="line heading">VL ...</td><td class="line text">EUR&nbsp;22,35</td>
-    patterns = [
-        r'VL[^<]{0,80}</td>\s*<td[^>]*>\s*(?:EUR|USD|GBP)?\s*&nbsp;\s*([\d.,]+)',
-        r'>\s*EUR\s*&nbsp;\s*([\d.,]+)\s*<',
-        r'>\s*EUR\s+([\d.,]+)\s*<',
-        r'"latestNAV"\s*:\s*"?([\d.,]+)"?',
-        r'"price"\s*:\s*"?([\d.,]+)"?',
-        r'data-price="([\d.,]+)"',
-    ]
-    for pat in patterns:
-        m = re.search(pat, html, flags=re.IGNORECASE)
-        if m:
-            val = _to_float_es(m.group(1))
-            if val is not None and val > 0:
-                return val
+    for fn, name in (
+        (_fetch_ft, "FT"),
+        (_fetch_morningstar, "Morningstar"),
+        (_fetch_yahoo, "Yahoo"),
+    ):
+        try:
+            nav = fn(isin)
+        except Exception as e:
+            log.warning(f"{name} failed for {isin}: {e}")
+            continue
+        if nav is not None and nav > 0:
+            log.info(f"{name} -> {isin} = {nav}")
+            return nav
+    log.warning(f"Ninguna fuente encontro precio para {isin}")
     return None
 
 
-def _to_float_es(s: str) -> Optional[float]:
-    """Convierte '1.234,56' o '22,35' o '22.35' a float."""
+# ─────────────────────────────────────────────────────────────────
+# Financial Times
+# ─────────────────────────────────────────────────────────────────
+def _fetch_ft(isin: str) -> Optional[float]:
+    """FT.com tearsheet. Funciona para fondos UCITS y ETFs.
+
+    URLs probadas:
+      - https://markets.ft.com/data/funds/tearsheet/summary?s={ISIN}:EUR
+      - https://markets.ft.com/data/etfs/tearsheet/summary?s={ISIN}:EUR
+    """
+    candidatos = [
+        f"https://markets.ft.com/data/funds/tearsheet/summary?s={isin}:EUR",
+        f"https://markets.ft.com/data/etfs/tearsheet/summary?s={isin}:EUR",
+        f"https://markets.ft.com/data/funds/tearsheet/summary?s={isin}",
+        f"https://markets.ft.com/data/etfs/tearsheet/summary?s={isin}",
+    ]
+    with httpx.Client(timeout=_TIMEOUT, follow_redirects=True, headers=_HEADERS) as c:
+        for url in candidatos:
+            r = c.get(url)
+            if r.status_code != 200:
+                continue
+            html = r.text
+            # Heuristica: si la pagina responde "no resultados", saltar
+            if "could not find" in html.lower() or "no results" in html.lower():
+                continue
+            # FT pone el precio destacado:
+            #   <span class="mod-ui-data-list__value">22.35</span>
+            patterns = [
+                r'class="mod-ui-data-list__value"[^>]*>\s*([\d,\.]+)\s*<',
+                r'class="mod-tearsheet-overview__quote__value"[^>]*>\s*([\d,\.]+)',
+                r'"lastPrice"\s*:\s*"?([\d,\.]+)"?',
+                r'data-price="([\d,\.]+)"',
+            ]
+            for pat in patterns:
+                m = re.search(pat, html)
+                if m:
+                    val = _to_float(m.group(1))
+                    if val and val > 0:
+                        return val
+    return None
+
+
+# ─────────────────────────────────────────────────────────────────
+# Morningstar.es
+# ─────────────────────────────────────────────────────────────────
+def _fetch_morningstar(isin: str) -> Optional[float]:
+    """Morningstar.es via endpoint de autocomplete + snapshot."""
+    with httpx.Client(timeout=_TIMEOUT, follow_redirects=True, headers=_HEADERS) as c:
+        # Endpoint interno de autocomplete que devuelve HTML con el MS_ID
+        ac_url = (
+            f"https://www.morningstar.es/es/util/SecuritySearch.ashx"
+            f"?source=&q={isin}&limit=5"
+        )
+        r = c.get(ac_url)
+        if r.status_code != 200:
+            return None
+        text = r.text
+        m = re.search(r'snapshot\.aspx\?id=([A-Z0-9]+)', text)
+        if not m:
+            # Probar como enlace HTML normal en busqueda
+            search_url = (
+                f"https://www.morningstar.es/es/funds/SecuritySearchResults.aspx"
+                f"?search={isin}"
+            )
+            r2 = c.get(search_url)
+            m = re.search(r'snapshot\.aspx\?id=([A-Z0-9]+)', r2.text)
+            if not m:
+                return None
+        ms_id = m.group(1)
+
+        snap_url = f"https://www.morningstar.es/es/funds/snapshot/snapshot.aspx?id={ms_id}"
+        r3 = c.get(snap_url)
+        if r3.status_code != 200:
+            return None
+        html = r3.text
+        patterns = [
+            r'VL[^<]{0,80}</td>\s*<td[^>]*>\s*(?:EUR|USD|GBP)?\s*&nbsp;?\s*([\d,\.]+)',
+            r'>\s*EUR\s*&nbsp;?\s*([\d,\.]+)\s*<',
+            r'data-price="([\d,\.]+)"',
+            r'"latestNAV"\s*:\s*"?([\d,\.]+)"?',
+        ]
+        for pat in patterns:
+            m = re.search(pat, html, flags=re.IGNORECASE)
+            if m:
+                val = _to_float(m.group(1))
+                if val and val > 0:
+                    return val
+    return None
+
+
+# ─────────────────────────────────────────────────────────────────
+# Yahoo Finance (fallback para ETFs)
+# ─────────────────────────────────────────────────────────────────
+def _fetch_yahoo(isin: str) -> Optional[float]:
+    """Yahoo Finance: a veces tiene ETFs europeos con sufijo de mercado.
+    Probamos con ISIN puro y con sufijos comunes (.AS, .L, .DE, .MI)."""
+    sufijos = ["", ".AS", ".L", ".DE", ".MI", ".PA"]
+    with httpx.Client(timeout=_TIMEOUT, follow_redirects=True, headers=_HEADERS) as c:
+        for suf in sufijos:
+            sym = isin + suf
+            url = f"https://query1.finance.yahoo.com/v7/finance/quote?symbols={sym}"
+            r = c.get(url)
+            if r.status_code != 200:
+                continue
+            try:
+                data = r.json()
+                results = data.get("quoteResponse", {}).get("result", [])
+                if results and "regularMarketPrice" in results[0]:
+                    val = float(results[0]["regularMarketPrice"])
+                    if val > 0:
+                        return val
+            except Exception:
+                continue
+    return None
+
+
+def _to_float(s: str) -> Optional[float]:
+    """Convierte '1.234,56', '22,35', '22.35' o '1,234.56' a float."""
     if s is None:
         return None
     s = s.strip()
     if not s:
         return None
-    # Si tiene punto y coma -> punto = miles, coma = decimal
     if "," in s and "." in s:
-        s = s.replace(".", "").replace(",", ".")
+        # Si el ultimo separador es coma -> formato europeo (punto miles)
+        if s.rfind(",") > s.rfind("."):
+            s = s.replace(".", "").replace(",", ".")
+        else:
+            # Formato anglosajon (coma miles)
+            s = s.replace(",", "")
     elif "," in s:
         s = s.replace(",", ".")
     try:

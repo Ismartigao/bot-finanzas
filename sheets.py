@@ -408,16 +408,22 @@ def refresh_fund_prices() -> dict:
     for i, r in enumerate(rng):
         r = (r or []) + [""] * (6 - len(r or []))
         activo = (r[0] or "").strip()
+        tipo = (r[1] or "").strip().lower()
         ticker = (r[2] or "").strip()
         if not activo:
             continue
 
-        # ETFs/cripto/acciones con formato MERCADO:TICKER -> los actualiza GOOGLEFINANCE solo
+        # Cripto: la formula del Sheet usa GOOGLEFINANCE("CURRENCY:"&C) -> auto.
+        if tipo == "cripto":
+            skipped.append({"activo": activo, "razon": "auto (GOOGLEFINANCE cripto)"})
+            continue
+
+        # ETFs/acciones con formato MERCADO:TICKER -> GOOGLEFINANCE auto.
         if ":" in ticker:
             skipped.append({"activo": activo, "razon": "auto (GOOGLEFINANCE)"})
             continue
 
-        # Fondos indexados con ISIN -> consultar Morningstar
+        # Fondos indexados / ETFs con ISIN -> consultar fuentes externas.
         if prices.looks_like_isin(ticker):
             nav = prices.fetch_fund_nav(ticker)
             if nav is not None and nav > 0:
