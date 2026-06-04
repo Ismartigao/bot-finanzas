@@ -29,7 +29,7 @@ DATA_END_ROW = 302  # última fila preparada del Excel original
 INV_POS_START = 5      # primera fila de posiciones
 INV_POS_END = 19       # última fila de posiciones preparada
 INV_HIST_START = 39    # primera fila del historial de aportaciones
-INV_HIST_END = 60      # última fila del historial
+INV_HIST_END = 300     # última fila del historial (ampliado para muchas compras)
 
 
 def _client() -> gspread.Client:
