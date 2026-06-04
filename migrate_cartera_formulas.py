@@ -99,7 +99,13 @@ def main():
 
         manual_part = _parse_num(row[3])
         manual_pmedio = _parse_num(row[4])
+        manual_coste = _parse_num(row[6])  # columna G (coste total)
         fecha1 = (row[12] or "").strip()
+
+        # Fallback: si la cartera no tiene precio medio (E vacio) pero si tiene
+        # coste (G) y participaciones (D), derivarlo: coste / participaciones.
+        if manual_pmedio <= TOL and manual_part > TOL and manual_coste > TOL:
+            manual_pmedio = manual_coste / manual_part
 
         add_shares, add_importe, sells = _hist_stats(hist_rows, activo)
         hist_part = add_shares - sells
