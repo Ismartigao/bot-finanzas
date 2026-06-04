@@ -17,11 +17,23 @@ HUCHAS_SHEET_NAME = os.getenv("HUCHAS_SHEET_NAME", "HUCHAS").strip()
 PRESUPUESTO_SHEET_NAME = os.getenv("PRESUPUESTO_SHEET_NAME", "PRESUPUESTO").strip()
 INVERSIONES_SHEET_NAME = os.getenv("INVERSIONES_SHEET_NAME", "INVERSIONES").strip()
 
+# Opcion A: ruta a un archivo JSON (recomendado en servidor propio)
+_creds_file = os.getenv("GOOGLE_CREDENTIALS_FILE", "").strip()
+# Opcion B: el JSON entero en una variable de entorno (Railway, etc.)
 _raw_creds = os.getenv("GOOGLE_CREDENTIALS_JSON", "").strip()
-try:
-    GOOGLE_CREDENTIALS = json.loads(_raw_creds) if _raw_creds else None
-except json.JSONDecodeError as e:
-    raise RuntimeError(f"GOOGLE_CREDENTIALS_JSON no es un JSON valido: {e}")
+
+GOOGLE_CREDENTIALS = None
+if _creds_file:
+    try:
+        with open(_creds_file, "r", encoding="utf-8") as f:
+            GOOGLE_CREDENTIALS = json.load(f)
+    except (OSError, json.JSONDecodeError) as e:
+        raise RuntimeError(f"No se pudo leer GOOGLE_CREDENTIALS_FILE ({_creds_file}): {e}")
+elif _raw_creds:
+    try:
+        GOOGLE_CREDENTIALS = json.loads(_raw_creds)
+    except json.JSONDecodeError as e:
+        raise RuntimeError(f"GOOGLE_CREDENTIALS_JSON no es un JSON valido: {e}")
 
 # ─── Otros ───────────────────────────────────────────────────────
 TIMEZONE = os.getenv("TIMEZONE", "Europe/Madrid")
