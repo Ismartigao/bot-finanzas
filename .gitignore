@@ -7,3 +7,6 @@ credentials.json
 google-credentials.json
 *.log
 .DS_Store
+*.key
+*.key.pub
+ssh-key-*
