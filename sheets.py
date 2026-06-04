@@ -57,6 +57,43 @@ def _inversiones():
     return sh.worksheet(config.INVERSIONES_SHEET_NAME)
 
 
+def _inversiones_with_sh():
+    """Como _inversiones() pero devuelve tambien el Spreadsheet (para metadata/locale)."""
+    gc = _client()
+    sh = gc.open_by_key(config.GOOGLE_SHEET_ID)
+    return sh, sh.worksheet(config.INVERSIONES_SHEET_NAME)
+
+
+def _localize_formula(formula: str, sep: str) -> str:
+    """Cambia el separador de argumentos ';' por el de la hoja (',' en locale US/UK)."""
+    return formula if sep == ";" else formula.replace(";", sep)
+
+
+def _cartera_d_formula(r: int, sep: str = ";") -> str:
+    """Participaciones netas del fondo de la fila r, sumadas desde el HISTORIAL.
+    Suma todo lo que NO sea Venta ni Dividendo y resta las Ventas."""
+    h1, h2 = INV_HIST_START, INV_HIST_END
+    f = (
+        f'=IF(A{r}="";"";'
+        f'SUMIFS($C${h1}:$C${h2};$B${h1}:$B${h2};A{r};$F${h1}:$F${h2};"<>Venta";$F${h1}:$F${h2};"<>Dividendo")'
+        f'-SUMIFS($C${h1}:$C${h2};$B${h1}:$B${h2};A{r};$F${h1}:$F${h2};"Venta"))'
+    )
+    return _localize_formula(f, sep)
+
+
+def _cartera_e_formula(r: int, sep: str = ";") -> str:
+    """Precio medio ponderado de compra del fondo de la fila r (desde el HISTORIAL).
+    = SUMA(importes de compras) / SUMA(cantidades de compras), excluyendo Ventas y Dividendos."""
+    h1, h2 = INV_HIST_START, INV_HIST_END
+    f = (
+        f'=IF(A{r}="";"";IFERROR('
+        f'SUMIFS($E${h1}:$E${h2};$B${h1}:$B${h2};A{r};$F${h1}:$F${h2};"<>Venta";$F${h1}:$F${h2};"<>Dividendo")'
+        f'/SUMIFS($C${h1}:$C${h2};$B${h1}:$B${h2};A{r};$F${h1}:$F${h2};"<>Venta";$F${h1}:$F${h2};"<>Dividendo")'
+        f';0))'
+    )
+    return _localize_formula(f, sep)
+
+
 def _find_first_empty_row(ws) -> int:
     """Busca la primera fila vacía en el rango de datos del TRACKER."""
     col_a = ws.col_values(1)  # columna Fecha
@@ -250,13 +287,17 @@ def _find_first_empty_hist_row(ws) -> Optional[int]:
 
 def append_investment(data: dict) -> dict:
     """
-    Registra una compra de inversion:
-      1. Actualiza/crea la posicion en INVERSIONES (filas 5-19).
-      2. Anade una linea al HISTORIAL DE APORTACIONES (filas 39-60).
+    Registra una compra de inversion (sin doble apunte):
+      1. Anade UNA linea al HISTORIAL DE APORTACIONES (filas 39-60).
+      2. La cartera (filas 5-19) se autocalcula: las columnas D (participaciones)
+         y E (precio medio) son formulas SUMIFS que leen del historial por nombre.
+         Si el fondo no existe aun en la cartera, se crea la fila con sus metadatos
+         (nombre, tipo, ticker, broker, fecha) y las formulas D/E.
       3. Anade la entrada correspondiente al TRACKER como GASTO Inversion aportada.
     Devuelve {"accion", "inv_row", "hist_row", "tracker_row"}.
     """
     ws = _inversiones()
+    sep = config.SHEETS_FORMULA_SEP
     activo = data.get("activo", "").strip()
     cantidad = float(data.get("cantidad", 0) or 0)
     precio = float(data.get("precio", 0) or 0)
@@ -268,32 +309,20 @@ def append_investment(data: dict) -> dict:
     else:
         fecha_str = str(fecha) if fecha else ""
 
-    # 1. Buscar posicion existente
+    # 1. Cartera: localizar la posicion (o crearla con metadatos + formulas).
+    #    Ya NO calculamos participaciones ni precio medio a mano: lo hacen las
+    #    formulas SUMIFS a partir del historial.
     inv_row = _find_position_by_name(ws, activo)
     if inv_row is not None:
-        # Actualizar: leer D (participaciones) y E (precio medio).
-        # NO tocamos F (precio actual) para no machacar la formula GOOGLEFINANCE.
-        current = ws.get(f"D{inv_row}:E{inv_row}")
-        cur_part = 0.0
-        cur_pmedio = 0.0
-        if current and current[0]:
-            fila = current[0] + [""] * (2 - len(current[0]))
-            cur_part = _parse_num(fila[0])
-            cur_pmedio = _parse_num(fila[1])
-        nuevas_part = cur_part + cantidad
-        if nuevas_part > 0:
-            nuevo_pmedio = (cur_part * cur_pmedio + cantidad * precio) / nuevas_part
-        else:
-            nuevo_pmedio = precio
+        # Asegurar que D y E son las formulas de autocalculo (idempotente).
         ws.update(
             f"D{inv_row}:E{inv_row}",
-            [[nuevas_part, round(nuevo_pmedio, 4)]],
+            [[_cartera_d_formula(inv_row, sep), _cartera_e_formula(inv_row, sep)]],
             value_input_option="USER_ENTERED",
         )
         accion = "actualizada"
     else:
-        # Crear nueva posicion en primera fila vacia.
-        # Se escriben A-E (sin F, para preservar la formula GOOGLEFINANCE de la celda).
+        # Crear nueva posicion en la primera fila vacia.
         inv_row = _find_first_empty_inv_row(ws)
         if inv_row is None:
             raise RuntimeError(
@@ -302,11 +331,16 @@ def append_investment(data: dict) -> dict:
         tipo_activo = data.get("tipo_activo", "") or "ETF"
         ticker = data.get("ticker", "")
         broker = data.get("broker", "")
-        # A-E: datos basicos; F: queda intacta (formula GOOGLEFINANCE);
-        # G-K: formulas prerrellenadas; L-M: broker + fecha 1a compra.
+        # A-C: metadatos; D-E: formulas de autocalculo; F: formula GOOGLEFINANCE
+        # (intacta); G-K: formulas prerrellenadas; L-M: broker + fecha 1a compra.
         ws.update(
-            f"A{inv_row}:E{inv_row}",
-            [[activo, tipo_activo, ticker, cantidad, precio]],
+            f"A{inv_row}:C{inv_row}",
+            [[activo, tipo_activo, ticker]],
+            value_input_option="USER_ENTERED",
+        )
+        ws.update(
+            f"D{inv_row}:E{inv_row}",
+            [[_cartera_d_formula(inv_row, sep), _cartera_e_formula(inv_row, sep)]],
             value_input_option="USER_ENTERED",
         )
         ws.update(
@@ -316,14 +350,17 @@ def append_investment(data: dict) -> dict:
         )
         accion = "creada"
 
-    # 2. Historial de aportaciones
+    # 2. Historial de aportaciones (UNICO sitio donde se apunta la compra)
     hist_row = _find_first_empty_hist_row(ws)
-    if hist_row is not None:
-        ws.update(
-            f"A{hist_row}:F{hist_row}",
-            [[fecha_str, activo, cantidad, precio, importe, "Compra"]],
-            value_input_option="USER_ENTERED",
+    if hist_row is None:
+        raise RuntimeError(
+            f"No hay filas libres en el HISTORIAL (filas {INV_HIST_START}-{INV_HIST_END})."
         )
+    ws.update(
+        f"A{hist_row}:F{hist_row}",
+        [[fecha_str, activo, cantidad, precio, importe, "Compra"]],
+        value_input_option="USER_ENTERED",
+    )
 
     # 3. TRACKER — reusa append_movement pero normalizando los campos
     ticker = data.get("ticker", "")

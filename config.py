@@ -38,6 +38,9 @@ elif _raw_creds:
 # ─── Otros ───────────────────────────────────────────────────────
 TIMEZONE = os.getenv("TIMEZONE", "Europe/Madrid")
 MODEL_TEXT = os.getenv("MODEL_TEXT", "gpt-4o-mini")
+# Separador de argumentos en formulas escritas via API.
+# Hojas en español/europeo usan ';'; en_US/en_GB usan ','.
+SHEETS_FORMULA_SEP = (os.getenv("SHEETS_FORMULA_SEP", ";").strip() or ";")
 MODEL_VISION = os.getenv("MODEL_VISION", "gpt-4o")
 
 # ─── Categorías válidas (deben coincidir con el Excel/Sheet) ────
