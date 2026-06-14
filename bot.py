@@ -387,6 +387,12 @@ async def _send_confirmation(update: Update, data: dict, es_ticket: bool = False
         InlineKeyboardButton("Guardar", callback_data=f"ok:{pid}"),
         InlineKeyboardButton("Cancelar", callback_data=f"no:{pid}"),
     ]]
+    # Si es un INGRESO que no se ha detectado ya como retirada de hucha,
+    # ofrecer boton de corrección rapida.
+    if data["tipo"] == "INGRESO" and data.get("categoria") != "Retirada de hucha":
+        kb.append([
+            InlineKeyboardButton("💰 Es retirada de hucha", callback_data=f"ret_hucha:{pid}"),
+        ])
     await update.message.reply_text(
         "\n".join(lineas),
         reply_markup=InlineKeyboardMarkup(kb),
@@ -443,6 +449,36 @@ async def handle_callback(update: Update, _ctx: ContextTypes.DEFAULT_TYPE):
         return await query.edit_message_text("No autorizado.")
 
     action, pid = query.data.split(":", 1)
+
+    # Correccion rapida: marcar como retirada de hucha sin guardar aun
+    if action == "ret_hucha":
+        data = pending.get(pid)
+        if not data:
+            return await query.edit_message_text("Este mensaje ha caducado. Envialo de nuevo.")
+        data["categoria"] = "Retirada de hucha"
+        data["tipo"] = "INGRESO"
+        # Devolver el pending con la nueva categoria y mostrar confirmacion actualizada
+        fecha = data["fecha"].strftime("%d/%m/%Y") if isinstance(data["fecha"], datetime.date) else data["fecha"]
+        lineas = [
+            "Categoria corregida. Voy a anotar:",
+            "",
+            f"Tipo:       + INGRESO",
+            f"Importe:    {_fmt_eur(data['importe'])}",
+            f"Categoria:  Retirada de hucha",
+            f"Descripcion: {data['descripcion'] or '(vacio)'}",
+            f"Metodo:     {data['metodo_pago']}",
+            f"Fecha:      {fecha}",
+        ]
+        if data.get("hucha"):
+            lineas.append(f"Hucha:      {data['hucha']}")
+        else:
+            lineas.append("Hucha:      (no detectada - se guardara sin hucha)")
+        kb = [[
+            InlineKeyboardButton("Guardar", callback_data=f"ok:{pid}"),
+            InlineKeyboardButton("Cancelar", callback_data=f"no:{pid}"),
+        ]]
+        return await query.edit_message_text("\n".join(lineas), reply_markup=InlineKeyboardMarkup(kb))
+
     data = pending.pop(pid, None)
     if not data:
         return await query.edit_message_text("Este mensaje ha caducado. Envialo de nuevo.")

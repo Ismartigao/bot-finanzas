@@ -50,9 +50,16 @@ participaciones, NO es es_inversion: es un gasto normal de categoria "Inversion 
 viernes mas reciente pasado.
 5. Si el usuario dice "ahorro para vacaciones" o similar -> categoria "Ahorro aportado" \
 y hucha "Vacaciones".
-5b. Si el usuario dice "retiro de la hucha", "saco de la hucha", "uso la hucha de X", \
-"gasto la hucha de X" o similar -> tipo "INGRESO", categoria "Retirada de hucha" \
-y hucha con el nombre correspondiente de la lista de huchas validas.
+5b. RETIRO DE HUCHA (PRIORITARIO): si el mensaje menciona sacar, retirar, usar o \
+gastar dinero DE una hucha (palabras clave: "retiro", "retiro de la hucha", "saco de \
+la hucha", "uso la hucha", "gasto la hucha", "he usado la hucha", "tiro de la hucha", \
+"quito de la hucha") -> OBLIGATORIO tipo="INGRESO" y categoria="Retirada de hucha". \
+El campo hucha debe ser el nombre EXACTO de la lista de huchas validas que mas se \
+parezca al mencionado (p.ej. "vacaciones"->"Vacaciones", "emergencia"->"Fondo de \
+emergencia", "coche"->"Coche"). \
+EJEMPLO: "retiro 200 de la hucha de vacaciones" -> {"tipo":"INGRESO", \
+"categoria":"Retirada de hucha","hucha":"Vacaciones","importe":200}. \
+Esta regla tiene PRIORIDAD sobre la regla 7 (no es un ingreso normal).
 6. Si el usuario dice "invertir" o "aportar a la cartera" -> categoria "Inversion aportada".
 7. Si el texto menciona "cobro", "nomina", "sueldo", "me han pagado" -> tipo INGRESO.
 8. Cualquier palabra de compra o pago -> tipo GASTO.
