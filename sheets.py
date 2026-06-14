@@ -174,11 +174,13 @@ def get_last_n_movements(n: int = 10) -> list[dict]:
 
 
 def month_summary(year: int, month: int) -> dict:
-    """Calcula ingresos, gastos, balance y tasa de ahorro del mes dado."""
+    """Calcula ingresos, gastos, balance y tasa de ahorro del mes dado.
+    Las 'Retirada de hucha' se separan de los ingresos reales para no distorsionar."""
     ws = _tracker()
     all_rows = ws.get(f"A{DATA_START_ROW}:K{DATA_END_ROW}")
     ingresos = 0.0
     gastos = 0.0
+    retiradas_hucha = 0.0
     por_categoria = {}
 
     for r in all_rows:
@@ -196,22 +198,26 @@ def month_summary(year: int, month: int) -> dict:
             continue
 
         tipo = r[1].strip().upper()
+        cat = r[2].strip() if len(r) > 2 else ""
         try:
             importe = float(str(r[5]).replace(",", ".").replace("\u20ac", "").replace(" ", ""))
         except ValueError:
             importe = 0.0
 
         if tipo == "INGRESO":
-            ingresos += importe
+            if cat == "Retirada de hucha":
+                retiradas_hucha += importe   # no cuenta como ingreso real
+            else:
+                ingresos += importe
         elif tipo == "GASTO":
             gastos += importe
-            cat = r[2].strip()
             por_categoria[cat] = por_categoria.get(cat, 0) + importe
 
     balance = ingresos - gastos
     tasa = (balance / ingresos) if ingresos > 0 else 0
     return {
         "ingresos": ingresos,
+        "retiradas_hucha": retiradas_hucha,
         "gastos": gastos,
         "balance": balance,
         "tasa_ahorro": tasa,

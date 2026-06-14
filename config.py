@@ -47,7 +47,8 @@ MODEL_VISION = os.getenv("MODEL_VISION", "gpt-4o")
 CAT_INGRESOS = [
     "Nomina", "Freelance/Consultoria", "Alquiler cobrado", "Dividendos",
     "Venta de activo", "Devolucion/Reembolso", "Bono/Extra",
-    "Regalo recibido", "Otros ingresos"
+    "Regalo recibido", "Otros ingresos",
+    "Retirada de hucha",   # retiro de dinero ahorrado en una hucha (no es ingreso real)
 ]
 CAT_GASTOS = [
     "Vivienda (alquiler/hipoteca)", "Suministros (luz/agua/gas)",

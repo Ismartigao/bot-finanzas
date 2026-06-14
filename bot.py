@@ -100,6 +100,7 @@ async def cmd_resumen(update: Update, _ctx: ContextTypes.DEFAULT_TYPE):
     gas = summary["gastos"]
     bal = summary["balance"]
     tasa = summary["tasa_ahorro"] * 100
+    ret_hucha = summary.get("retiradas_hucha", 0.0)
 
     top = sorted(summary["por_categoria"].items(), key=lambda x: -x[1])[:5]
     meses = ["enero", "febrero", "marzo", "abril", "mayo", "junio",
@@ -111,9 +112,11 @@ async def cmd_resumen(update: Update, _ctx: ContextTypes.DEFAULT_TYPE):
         f"Ingresos:  {_fmt_eur(ing)}\n"
         f"Gastos:    {_fmt_eur(gas)}\n"
         f"Balance:   {_fmt_eur(bal)}\n"
-        f"Tasa ahorro: {tasa:.1f}%\n\n"
-        f"Top gastos por categoria:\n"
+        f"Tasa ahorro: {tasa:.1f}%\n"
     )
+    if ret_hucha > 0:
+        msg += f"Retiradas de hucha: {_fmt_eur(ret_hucha)} (no cuentan como ingreso)\n"
+    msg += "\nTop gastos por categoria:\n"
     if top:
         for c, v in top:
             msg += f"  - {c}: {_fmt_eur(v)}\n"

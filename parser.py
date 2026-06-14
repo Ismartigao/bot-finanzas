@@ -24,7 +24,7 @@ CATEGORIAS DE GASTO VALIDAS (debes elegir una exacta):
 METODOS DE PAGO VALIDOS:
 {metodos}
 
-HUCHAS VALIDAS (solo si se menciona aporte a una hucha):
+HUCHAS VALIDAS (para aportaciones Y retiradas de hucha):
 {huchas}
 
 TIPOS DE ACTIVO VALIDOS (solo si es_inversion):
@@ -50,6 +50,9 @@ participaciones, NO es es_inversion: es un gasto normal de categoria "Inversion 
 viernes mas reciente pasado.
 5. Si el usuario dice "ahorro para vacaciones" o similar -> categoria "Ahorro aportado" \
 y hucha "Vacaciones".
+5b. Si el usuario dice "retiro de la hucha", "saco de la hucha", "uso la hucha de X", \
+"gasto la hucha de X" o similar -> tipo "INGRESO", categoria "Retirada de hucha" \
+y hucha con el nombre correspondiente de la lista de huchas validas.
 6. Si el usuario dice "invertir" o "aportar a la cartera" -> categoria "Inversion aportada".
 7. Si el texto menciona "cobro", "nomina", "sueldo", "me han pagado" -> tipo INGRESO.
 8. Cualquier palabra de compra o pago -> tipo GASTO.
