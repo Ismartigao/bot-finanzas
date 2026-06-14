@@ -83,14 +83,51 @@ def actualizar_desplegable_categorias():
     print("     Incluye 'Retirada de hucha'.")
 
 
+def actualizar_desplegable_huchas():
+    """Pone la validacion de la columna H (Hucha vinculada) POR RANGO apuntando a
+    la hoja HUCHAS A5:A12. Asi el desplegable se actualiza solo cuando renombras o
+    creas huchas en esa hoja (no hay que volver a ejecutar este script)."""
+    ws = sheets._tracker()
+    sh = ws.spreadsheet
+    sheet_id = ws.id
+
+    hojas = config.HUCHAS_SHEET_NAME
+    rango_ref = f"={hojas}!$A$5:$A$12"
+    request = {
+        "setDataValidation": {
+            "range": {
+                "sheetId": sheet_id,
+                "startRowIndex": TRACKER_DATA_START - 1,
+                "endRowIndex": TRACKER_DATA_END,
+                "startColumnIndex": 7,   # col H (0-based)
+                "endColumnIndex": 8,
+            },
+            "rule": {
+                "condition": {"type": "ONE_OF_RANGE",
+                              "values": [{"userEnteredValue": rango_ref}]},
+                "strict": False,
+                "showCustomUi": True,
+            },
+        }
+    }
+    sh.batch_update({"requests": [request]})
+    print(f"\n[OK] Desplegable de huchas (col H) ahora apunta a {hojas}!A5:A12.")
+    print("     Se actualizara solo cuando cambies nombres en la hoja HUCHAS.")
+
+
 def main():
     print("Reparando hoja para retiradas de hucha...")
     fijar_formulas_saldo()
     try:
         actualizar_desplegable_categorias()
     except Exception as e:
-        print(f"\n[AVISO] No se pudo actualizar el desplegable automaticamente: {e}")
+        print(f"\n[AVISO] No se pudo actualizar el desplegable de categorias: {e}")
         print("        Puedes añadir 'Retirada de hucha' a mano: Datos > Validacion de datos en la columna Categoria.")
+    try:
+        actualizar_desplegable_huchas()
+    except Exception as e:
+        print(f"\n[AVISO] No se pudo actualizar el desplegable de huchas: {e}")
+        print("        Puedes ponerlo a mano: Datos > Validacion de datos en la columna Hucha vinculada -> 'de un intervalo' =HUCHAS!A5:A12.")
     print("\nListo. Las retiradas (importe negativo) restaran del saldo de la hucha.")
 
 

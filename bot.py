@@ -66,7 +66,7 @@ async def cmd_start(update: Update, _ctx: ContextTypes.DEFAULT_TYPE):
         "Inversiones (compras): envia p.ej. 'compra 5 IWDA a 82 en investor' y lo anadire\n"
         "a la hoja INVERSIONES (posicion + historial) y al TRACKER como gasto.\n\n"
         "Comandos:\n"
-        "/resumen - KPIs del mes\n"
+        "/resumen [mes] - KPIs del mes (ej: /resumen 4 = abril)\n"
         "/huchas - progreso de huchas\n"
         "/cartera - posiciones actuales de inversion\n"
         "/actualizar - refresca precio de TODOS los fondos indexados (Morningstar)\n"
@@ -84,14 +84,30 @@ async def cmd_help(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     await cmd_start(update, ctx)
 
 
-async def cmd_resumen(update: Update, _ctx: ContextTypes.DEFAULT_TYPE):
+async def cmd_resumen(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if not _is_authorized(update):
         return await _reject(update)
     tz = pytz.timezone(config.TIMEZONE)
     now = datetime.datetime.now(tz)
+
+    # /resumen [mes] -> mes anterior. Sin argumento = mes actual.
+    year, month = now.year, now.month
+    if ctx.args:
+        try:
+            m = int(ctx.args[0])
+        except ValueError:
+            return await update.message.reply_text(
+                "Uso: /resumen [mes]\nEjemplo: /resumen 4 (abril)"
+            )
+        if not 1 <= m <= 12:
+            return await update.message.reply_text("El mes debe ser un numero del 1 al 12.")
+        month = m
+        # Si pides un mes futuro respecto a hoy, se asume el del año pasado.
+        year = now.year if m <= now.month else now.year - 1
+
     await update.message.chat.send_action(constants.ChatAction.TYPING)
     try:
-        summary = await asyncio.to_thread(sheets.month_summary, now.year, now.month)
+        summary = await asyncio.to_thread(sheets.month_summary, year, month)
     except Exception as e:
         log.exception("Error leyendo resumen")
         return await update.message.reply_text(f"Error: {e}")
@@ -105,10 +121,10 @@ async def cmd_resumen(update: Update, _ctx: ContextTypes.DEFAULT_TYPE):
     top = sorted(summary["por_categoria"].items(), key=lambda x: -x[1])[:5]
     meses = ["enero", "febrero", "marzo", "abril", "mayo", "junio",
              "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"]
-    mes_txt = meses[now.month - 1]
+    mes_txt = meses[month - 1]
 
     msg = (
-        f"Resumen de {mes_txt} {now.year}\n\n"
+        f"Resumen de {mes_txt} {year}\n\n"
         f"Ingresos:  {_fmt_eur(ing)}\n"
         f"Gastos:    {_fmt_eur(gas)}\n"
         f"Balance:   {_fmt_eur(bal)}\n"
@@ -454,10 +470,18 @@ async def _send_investment_confirmation(update: Update, data: dict):
 
 
 def _ask_hucha_kb(pid: str) -> InlineKeyboardMarkup:
-    """Teclado para elegir de que hucha se retira el dinero."""
+    """Teclado para elegir de que hucha se retira el dinero.
+    Lee los nombres EN VIVO de la hoja HUCHAS y guarda la lista resuelta en el
+    pending, para que el callback set_hucha resuelva por indice de forma fiable."""
+    try:
+        nombres = sheets.list_hucha_names()
+    except Exception:
+        nombres = list(config.HUCHAS)
+    if pid in pending:
+        pending[pid]["_hucha_opts"] = nombres
     botones = []
     fila = []
-    for i, h in enumerate(config.HUCHAS):
+    for i, h in enumerate(nombres):
         fila.append(InlineKeyboardButton(h, callback_data=f"set_hucha:{pid}:{i}"))
         if len(fila) == 2:
             botones.append(fila)
@@ -524,8 +548,9 @@ async def handle_callback(update: Update, _ctx: ContextTypes.DEFAULT_TYPE):
         data = pending.get(pid)
         if not data:
             return await query.edit_message_text("Este mensaje ha caducado. Envialo de nuevo.")
+        opciones = data.get("_hucha_opts") or list(config.HUCHAS)
         try:
-            data["hucha"] = config.HUCHAS[int(idx)]
+            data["hucha"] = opciones[int(idx)]
         except (ValueError, IndexError):
             data["hucha"] = ""
         return await query.edit_message_text(

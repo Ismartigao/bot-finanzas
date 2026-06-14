@@ -3,14 +3,32 @@ en movimientos estructurados usando OpenAI."""
 import base64
 import datetime
 import json
+import time
 from typing import Optional
 
 from openai import OpenAI
 import pytz
 
 import config
+import sheets
 
 _client = OpenAI(api_key=config.OPENAI_API_KEY)
+
+# Cache de nombres de huchas (se leen en vivo de la hoja, con TTL corto)
+_huchas_cache = {"names": list(config.HUCHAS), "ts": 0.0}
+_HUCHAS_TTL = 60  # segundos
+
+
+def _get_hucha_names() -> list[str]:
+    """Nombres de huchas en vivo (cacheados ~60s). Fallback a config.HUCHAS."""
+    now = time.time()
+    if now - _huchas_cache["ts"] > _HUCHAS_TTL:
+        try:
+            _huchas_cache["names"] = sheets.list_hucha_names()
+        except Exception:
+            _huchas_cache["names"] = list(config.HUCHAS)
+        _huchas_cache["ts"] = now
+    return _huchas_cache["names"]
 
 SYSTEM_PROMPT = """Eres un parser de movimientos financieros personales en espanol. \
 Tu unica tarea es convertir mensajes en lenguaje natural a un JSON estructurado.
@@ -78,7 +96,7 @@ def _build_system_prompt() -> str:
         cat_ingresos="\n".join(f"- {c}" for c in config.CAT_INGRESOS),
         cat_gastos="\n".join(f"- {c}" for c in config.CAT_GASTOS),
         metodos=", ".join(config.METODOS_PAGO),
-        huchas=", ".join(config.HUCHAS),
+        huchas=", ".join(_get_hucha_names()),
         tipos_activo=", ".join(config.TIPOS_ACTIVO),
     )
 

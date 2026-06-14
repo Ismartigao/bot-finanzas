@@ -178,6 +178,36 @@ def get_last_n_movements(n: int = 10) -> list[dict]:
     return result
 
 
+def _cell_to_date(v) -> Optional[datetime.date]:
+    """Convierte una celda de fecha de Sheets a date.
+    Acepta numero de serie (date real) o string dd/mm/yyyy / yyyy-mm-dd."""
+    if v is None or v == "":
+        return None
+    # Numero de serie de Google Sheets (epoch 1899-12-30)
+    if isinstance(v, (int, float)):
+        try:
+            return datetime.date(1899, 12, 30) + datetime.timedelta(days=int(v))
+        except (ValueError, OverflowError):
+            return None
+    s = str(v).strip()
+    for fmt in ("%d/%m/%Y", "%Y-%m-%d", "%d/%m/%y", "%d-%m-%Y"):
+        try:
+            return datetime.datetime.strptime(s, fmt).date()
+        except ValueError:
+            continue
+    return None
+
+
+def _cell_to_float(v) -> float:
+    """Convierte una celda de importe a float (numero directo o string con \u20ac/comas)."""
+    if isinstance(v, (int, float)):
+        return float(v)
+    try:
+        return float(str(v).replace("\u20ac", "").replace(" ", "").replace(",", "."))
+    except (ValueError, TypeError):
+        return 0.0
+
+
 def month_summary(year: int, month: int) -> dict:
     """Calcula ingresos, gastos, balance y tasa de ahorro del mes dado.
 
@@ -185,32 +215,27 @@ def month_summary(year: int, month: int) -> dict:
     reales (porque el dinero ya se gasto al ahorrar). Se muestran aparte y NO se
     cuentan como gasto real ni como ingreso."""
     ws = _tracker()
-    all_rows = ws.get(f"A{DATA_START_ROW}:K{DATA_END_ROW}")
+    # UNFORMATTED_VALUE: fechas como numero de serie, importes como numero.
+    # Asi no dependemos del formato de presentacion de la hoja.
+    all_rows = ws.get(
+        f"A{DATA_START_ROW}:K{DATA_END_ROW}",
+        value_render_option="UNFORMATTED_VALUE",
+    )
     ingresos = 0.0
     gastos_real = 0.0
     retiradas_hucha = 0.0
     por_categoria = {}
 
     for r in all_rows:
-        if not r or len(r) < 6 or not r[0].strip():
+        if not r or len(r) < 6:
             continue
-        try:
-            # Fecha puede venir como string dd/mm/yyyy
-            partes = r[0].split("/")
-            if len(partes) != 3:
-                continue
-            d, m, y = int(partes[0]), int(partes[1]), int(partes[2])
-            if m != month or y != year:
-                continue
-        except (ValueError, IndexError):
+        fecha = _cell_to_date(r[0])
+        if fecha is None or fecha.month != month or fecha.year != year:
             continue
 
-        tipo = r[1].strip().upper()
-        cat = r[2].strip() if len(r) > 2 else ""
-        try:
-            importe = float(str(r[5]).replace(",", ".").replace("\u20ac", "").replace(" ", ""))
-        except ValueError:
-            importe = 0.0
+        tipo = str(r[1]).strip().upper()
+        cat = str(r[2]).strip() if len(r) > 2 else ""
+        importe = _cell_to_float(r[5])
 
         if tipo == "INGRESO":
             ingresos += importe
@@ -559,3 +584,15 @@ def huchas_summary() -> list[dict]:
             "estado": r[9],
         })
     return result
+
+
+def list_hucha_names() -> list[str]:
+    """Devuelve los nombres de las huchas EN VIVO desde la hoja HUCHAS (A5:A12).
+    Si falla la lectura, cae a la lista fija de config.HUCHAS."""
+    try:
+        ws = _huchas()
+        rows = ws.get("A5:A12")
+        nombres = [r[0].strip() for r in rows if r and r[0].strip()]
+        return nombres or list(config.HUCHAS)
+    except Exception:
+        return list(config.HUCHAS)
