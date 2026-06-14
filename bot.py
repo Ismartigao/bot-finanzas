@@ -62,7 +62,8 @@ async def cmd_start(update: Update, _ctx: ContextTypes.DEFAULT_TYPE):
         "  - ayer 12 euros de farmacia bizum\n"
         "  - nomina 2400\n"
         "  - 150 a la hucha de vacaciones\n\n"
-        "Tambien puedes enviar una FOTO de un ticket y la leere.\n\n"
+        "Tambien puedes enviar una FOTO: un ticket de compra (lo registro como gasto)\n"
+        "o una captura de compra(s) de fondos/ETFs (la analizo y anado cada inversion).\n\n"
         "Inversiones (compras): envia p.ej. 'compra 5 IWDA a 82 en investor' y lo anadire\n"
         "a la hoja INVERSIONES (posicion + historial) y al TRACKER como gasto.\n\n"
         "Comandos:\n"
@@ -357,11 +358,28 @@ async def handle_photo(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     image_bytes = buf.getvalue()
 
     try:
-        data = await asyncio.to_thread(parser.parse_ticket_image, image_bytes)
+        data = await asyncio.to_thread(parser.parse_photo, image_bytes)
     except Exception as e:
-        log.exception("Error parseando ticket")
-        return await update.message.reply_text(f"No pude leer el ticket: {e}")
+        log.exception("Error parseando imagen")
+        return await update.message.reply_text(f"No pude leer la imagen: {e}")
 
+    # Imagen de inversion: puede traer VARIAS compras -> una confirmacion por compra.
+    if data.get("clasif") == "inversion":
+        compras = data.get("compras") or []
+        if not compras:
+            return await update.message.reply_text(
+                "He visto una confirmacion de inversion pero no pude leer los datos. "
+                "Reenvia la imagen mas nitida o registralo a mano."
+            )
+        await update.message.reply_text(
+            f"He detectado {len(compras)} compra(s) de inversion. Confirma cada una:"
+        )
+        for c in compras:
+            c["notas"] = "[captura inversion]"
+            await _send_investment_confirmation(update, c)
+        return
+
+    # Ticket de gasto normal
     data["notas"] = (data.get("notas", "") + " [ticket foto]").strip()
     await _send_confirmation(update, data, es_ticket=True)
 
@@ -444,7 +462,7 @@ async def _send_investment_confirmation(update: Update, data: dict):
     if data.get("ticker"):
         lineas.append(f"Ticker/ISIN:  {data['ticker']}")
     lineas.extend([
-        f"Cantidad:     {data.get('cantidad', 0):g} participaciones",
+        f"Cantidad:     {_fmt_part(data.get('cantidad', 0))} participaciones",
         f"Precio unit.: {_fmt_eur(data.get('precio', 0))}",
         f"Importe:      {_fmt_eur(data.get('importe', 0))}",
     ])
@@ -590,6 +608,15 @@ async def handle_callback(update: Update, _ctx: ContextTypes.DEFAULT_TYPE):
         except Exception as e:
             log.exception("Error guardando")
             await query.edit_message_text(f"Error al guardar: {e}")
+
+
+def _fmt_part(v) -> str:
+    """Formatea participaciones con precision completa, sin ceros sobrantes."""
+    try:
+        s = f"{float(v):.8f}".rstrip("0").rstrip(".")
+        return s if s else "0"
+    except (ValueError, TypeError):
+        return str(v)
 
 
 def _fmt_eur(v) -> str:

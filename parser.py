@@ -228,3 +228,122 @@ def _normalize(data: dict) -> dict:
                 data["descripcion"] = data["activo"]
 
     return data
+
+
+def _parse_iso_date(s) -> Optional[datetime.date]:
+    """Parsea 'YYYY-MM-DD' (o dd/mm/yyyy) a date, o None."""
+    if not s:
+        return None
+    for fmt in ("%Y-%m-%d", "%d/%m/%Y"):
+        try:
+            return datetime.datetime.strptime(str(s).strip(), fmt).date()
+        except ValueError:
+            continue
+    return None
+
+
+def _num_robusto(v) -> float:
+    """Convierte numero o string (con € , .) a float. 0.0 si no se puede."""
+    if isinstance(v, (int, float)):
+        return float(v)
+    s = str(v).replace("€", "").replace(" ", "").strip()
+    if not s:
+        return 0.0
+    try:
+        return float(s)                       # "118.2673992", "200"
+    except ValueError:
+        try:
+            return float(s.replace(".", "").replace(",", "."))  # "1.234,56"
+        except ValueError:
+            return 0.0
+
+
+def _normalize_investment_image(data: dict) -> dict:
+    """Normaliza la respuesta de una imagen de inversion en una lista de compras
+    listas para append_investment. precio = importe / participaciones (exacto)."""
+    tz = pytz.timezone(config.TIMEZONE)
+    hoy = datetime.datetime.now(tz).date()
+    fecha_global = _parse_iso_date(data.get("fecha")) or hoy
+
+    compras = []
+    for c in (data.get("compras") or []):
+        activo = str(c.get("activo", "")).strip()
+        importe = abs(_num_robusto(c.get("importe", 0)))
+        participaciones = abs(_num_robusto(c.get("participaciones", 0)))
+        if not activo or importe <= 0 or participaciones <= 0:
+            continue
+        precio = importe / participaciones  # NAV por participacion (informativo)
+        compras.append({
+            "es_inversion": True,
+            "activo": activo,
+            "tipo_activo": str(c.get("tipo_activo", "") or "Fondo indexado"),
+            "ticker": str(c.get("ticker", "") or ""),
+            "cantidad": participaciones,
+            "precio": precio,
+            "importe": round(importe, 2),
+            "broker": str(c.get("broker", "") or ""),
+            "fecha": _parse_iso_date(c.get("fecha")) or fecha_global,
+            "tipo": "GASTO",
+            "categoria": "Inversion aportada",
+            "descripcion": activo,
+            "metodo_pago": "Transferencia",
+            "estado": "REAL",
+            "notas": "",
+            "confianza": 0.9,
+        })
+    return {"clasif": "inversion", "compras": compras}
+
+
+def parse_photo(image_bytes: bytes) -> dict:
+    """Analiza una foto. Distingue entre:
+      - confirmacion de compra(s) de inversion -> {'clasif':'inversion','compras':[...]}
+      - ticket de gasto normal               -> dict de movimiento + 'clasif'='gasto'
+    """
+    b64 = base64.b64encode(image_bytes).decode("utf-8")
+    prompt_user = (
+        "Analiza la imagen. Puede ser UNA de estas dos cosas:\n"
+        "1) CONFIRMACION DE INVERSION: compra/suscripcion de fondos, ETFs, acciones "
+        "o cripto, posiblemente con VARIAS operaciones en la misma captura (apps tipo "
+        "MyInvestor, etc.). En ese caso devuelve EXACTAMENTE este JSON: "
+        '{"clasif":"inversion","fecha":"YYYY-MM-DD","compras":['
+        '{"activo":"nombre del activo tal cual aparece","importe":NUMERO_EUR,'
+        '"participaciones":NUMERO,"broker":"si se ve"}]}. '
+        "El importe es el dinero invertido en euros; participaciones es el numero de "
+        "participaciones/acciones adquiridas (puede tener muchos decimales). Si la fecha "
+        "aparece una sola vez (arriba), aplicala a todas las compras. Incluye TODAS las "
+        "operaciones que veas.\n"
+        "2) TICKET DE GASTO normal (compra en tienda/super/bar): devuelve este JSON: "
+        '{"clasif":"gasto","tipo":"GASTO","importe":TOTAL,"categoria":"...",'
+        '"descripcion":"comercio","metodo_pago":"...","fecha":"YYYY-MM-DD","confianza":0.0-1.0}. '
+        "Elige la categoria de la lista de categorias de gasto validas.\n"
+        "Devuelve SOLO el JSON, sin texto adicional."
+    )
+    response = _client.chat.completions.create(
+        model=config.MODEL_VISION,
+        messages=[
+            {"role": "system", "content": _build_system_prompt()},
+            {"role": "system", "content": _today_context()},
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": prompt_user},
+                    {
+                        "type": "image_url",
+                        "image_url": {
+                            "url": f"data:image/jpeg;base64,{b64}",
+                            "detail": "high",
+                        },
+                    },
+                ],
+            },
+        ],
+        response_format={"type": "json_object"},
+        temperature=0.1,
+        max_tokens=900,
+    )
+    data = json.loads(response.choices[0].message.content)
+    if str(data.get("clasif", "")).lower() == "inversion":
+        return _normalize_investment_image(data)
+    norm = _normalize(data)
+    norm["clasif"] = "gasto"
+    return norm
