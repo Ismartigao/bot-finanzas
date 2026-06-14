@@ -463,7 +463,7 @@ async def _send_investment_confirmation(update: Update, data: dict):
         lineas.append(f"Ticker/ISIN:  {data['ticker']}")
     lineas.extend([
         f"Cantidad:     {_fmt_part(data.get('cantidad', 0))} participaciones",
-        f"Precio unit.: {_fmt_eur(data.get('precio', 0))}",
+        f"Precio unit.: {_fmt_eur_precise(data.get('precio', 0))}",
         f"Importe:      {_fmt_eur(data.get('importe', 0))}",
     ])
     if data.get("broker"):
@@ -617,6 +617,21 @@ def _fmt_part(v) -> str:
         return s if s else "0"
     except (ValueError, TypeError):
         return str(v)
+
+
+def _fmt_eur_precise(v, dec: int = 6) -> str:
+    """Formatea EUR con hasta `dec` decimales (para precios unitarios), recortando
+    ceros sobrantes pero dejando minimo 2 decimales. Formato europeo."""
+    try:
+        v = float(v)
+    except (ValueError, TypeError):
+        return str(v)
+    s = f"{v:,.{dec}f}".replace(",", "X").replace(".", ",").replace("X", ".")
+    entero, _, dec_part = s.partition(",")
+    dec_part = dec_part.rstrip("0")
+    if len(dec_part) < 2:
+        dec_part = (dec_part + "00")[:2]
+    return f"{entero},{dec_part} EUR"
 
 
 def _fmt_eur(v) -> str:
