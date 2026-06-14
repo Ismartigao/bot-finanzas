@@ -52,14 +52,16 @@ viernes mas reciente pasado.
 y hucha "Vacaciones".
 5b. RETIRO DE HUCHA (PRIORITARIO): si el mensaje menciona sacar, retirar, usar o \
 gastar dinero DE una hucha (palabras clave: "retiro", "retiro de la hucha", "saco de \
-la hucha", "uso la hucha", "gasto la hucha", "he usado la hucha", "tiro de la hucha", \
-"quito de la hucha") -> OBLIGATORIO tipo="INGRESO" y categoria="Retirada de hucha". \
-El campo hucha debe ser el nombre EXACTO de la lista de huchas validas que mas se \
-parezca al mencionado (p.ej. "vacaciones"->"Vacaciones", "emergencia"->"Fondo de \
-emergencia", "coche"->"Coche"). \
-EJEMPLO: "retiro 200 de la hucha de vacaciones" -> {"tipo":"INGRESO", \
-"categoria":"Retirada de hucha","hucha":"Vacaciones","importe":200}. \
-Esta regla tiene PRIORIDAD sobre la regla 7 (no es un ingreso normal).
+la hucha", "saque de la hucha", "uso la hucha", "gasto la hucha", "he usado la hucha", \
+"tiro de la hucha", "quito de la hucha") -> OBLIGATORIO tipo="GASTO" y \
+categoria="Retirada de hucha", con importe POSITIVO (el sistema lo convierte a \
+negativo despues). El campo hucha debe ser el nombre EXACTO de la lista de huchas \
+validas que mas se parezca al mencionado (p.ej. "vacaciones"->"Vacaciones", \
+"emergencia"/"fondo de emergencia"->"Fondo de emergencia", "coche"->"Coche", \
+"navidad"->"Navidad", "formacion"->"Formacion"). \
+EJEMPLO: "saque 120 de la hucha de vacaciones" -> {"tipo":"GASTO", \
+"categoria":"Retirada de hucha","hucha":"Vacaciones","importe":120}. \
+Esta regla tiene PRIORIDAD: NUNCA marques una retirada de hucha como INGRESO.
 6. Si el usuario dice "invertir" o "aportar a la cartera" -> categoria "Inversion aportada".
 7. Si el texto menciona "cobro", "nomina", "sueldo", "me han pagado" -> tipo INGRESO.
 8. Cualquier palabra de compra o pago -> tipo GASTO.

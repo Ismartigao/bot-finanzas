@@ -126,6 +126,11 @@ def append_movement(data: dict) -> int:
     except (ValueError, TypeError):
         importe = 0.0
 
+    # Las retiradas de hucha se guardan con importe NEGATIVO: asi restan del
+    # saldo de la hucha (col F) y compensan los gastos en el balance del mes.
+    if (data.get("categoria") or "").strip() == "Retirada de hucha":
+        importe = -abs(importe)
+
     row = [
         fecha_str,
         data.get("tipo", ""),
@@ -175,11 +180,14 @@ def get_last_n_movements(n: int = 10) -> list[dict]:
 
 def month_summary(year: int, month: int) -> dict:
     """Calcula ingresos, gastos, balance y tasa de ahorro del mes dado.
-    Las 'Retirada de hucha' se separan de los ingresos reales para no distorsionar."""
+
+    Las 'Retirada de hucha' son GASTOS con importe NEGATIVO: compensan los gastos
+    reales (porque el dinero ya se gasto al ahorrar). Se muestran aparte y NO se
+    cuentan como gasto real ni como ingreso."""
     ws = _tracker()
     all_rows = ws.get(f"A{DATA_START_ROW}:K{DATA_END_ROW}")
     ingresos = 0.0
-    gastos = 0.0
+    gastos_real = 0.0
     retiradas_hucha = 0.0
     por_categoria = {}
 
@@ -205,20 +213,22 @@ def month_summary(year: int, month: int) -> dict:
             importe = 0.0
 
         if tipo == "INGRESO":
-            if cat == "Retirada de hucha":
-                retiradas_hucha += importe   # no cuenta como ingreso real
-            else:
-                ingresos += importe
+            ingresos += importe
         elif tipo == "GASTO":
-            gastos += importe
-            por_categoria[cat] = por_categoria.get(cat, 0) + importe
+            if cat == "Retirada de hucha":
+                retiradas_hucha += -importe   # importe es negativo -> sumar positivo
+            else:
+                gastos_real += importe
+                por_categoria[cat] = por_categoria.get(cat, 0) + importe
 
-    balance = ingresos - gastos
+    # El dinero retirado de huchas compensa los gastos itemizados (ya se conto
+    # como gasto al ahorrar), por eso se suma de vuelta al balance.
+    balance = ingresos - gastos_real + retiradas_hucha
     tasa = (balance / ingresos) if ingresos > 0 else 0
     return {
         "ingresos": ingresos,
         "retiradas_hucha": retiradas_hucha,
-        "gastos": gastos,
+        "gastos": gastos_real,
         "balance": balance,
         "tasa_ahorro": tasa,
         "por_categoria": por_categoria,

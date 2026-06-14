@@ -115,7 +115,7 @@ async def cmd_resumen(update: Update, _ctx: ContextTypes.DEFAULT_TYPE):
         f"Tasa ahorro: {tasa:.1f}%\n"
     )
     if ret_hucha > 0:
-        msg += f"Retiradas de hucha: {_fmt_eur(ret_hucha)} (no cuentan como ingreso)\n"
+        msg += f"Retiradas de hucha: {_fmt_eur(ret_hucha)} (compensan gastos ya ahorrados)\n"
     msg += "\nTop gastos por categoria:\n"
     if top:
         for c, v in top:
@@ -358,6 +358,17 @@ async def _send_confirmation(update: Update, data: dict, es_ticket: bool = False
     pid = uuid.uuid4().hex[:10]
     pending[pid] = data
 
+    # Retirada de hucha: si no se detecto la hucha, pedirla; si si, confirmar.
+    if (data.get("categoria") or "").strip() == "Retirada de hucha":
+        data["tipo"] = "GASTO"
+        if not data.get("hucha"):
+            return await update.message.reply_text(
+                "De que hucha sale el dinero?", reply_markup=_ask_hucha_kb(pid)
+            )
+        return await update.message.reply_text(
+            _retirada_confirm_text(data), reply_markup=_retirada_confirm_kb(pid)
+        )
+
     tipo_emoji = "+" if data["tipo"] == "INGRESO" else "-"
     fecha = data["fecha"].strftime("%d/%m/%Y") if isinstance(data["fecha"], datetime.date) else data["fecha"]
     confianza_pct = int(data["confianza"] * 100)
@@ -442,43 +453,86 @@ async def _send_investment_confirmation(update: Update, data: dict):
     )
 
 
+def _ask_hucha_kb(pid: str) -> InlineKeyboardMarkup:
+    """Teclado para elegir de que hucha se retira el dinero."""
+    botones = []
+    fila = []
+    for i, h in enumerate(config.HUCHAS):
+        fila.append(InlineKeyboardButton(h, callback_data=f"set_hucha:{pid}:{i}"))
+        if len(fila) == 2:
+            botones.append(fila)
+            fila = []
+    if fila:
+        botones.append(fila)
+    botones.append([InlineKeyboardButton("Cancelar", callback_data=f"no:{pid}")])
+    return InlineKeyboardMarkup(botones)
+
+
+def _retirada_confirm_text(data: dict) -> str:
+    """Texto de confirmacion de una retirada de hucha."""
+    fecha = data["fecha"].strftime("%d/%m/%Y") if isinstance(data["fecha"], datetime.date) else data["fecha"]
+    lineas = [
+        "Retirada de hucha. Voy a anotar:",
+        "",
+        f"Tipo:       - GASTO (retirada)",
+        f"Importe:    {_fmt_eur(data['importe'])} (sale de la hucha)",
+        f"Categoria:  Retirada de hucha",
+        f"Hucha:      {data.get('hucha') or '(sin hucha - no restara de ninguna)'}",
+        f"Descripcion: {data['descripcion'] or '(vacio)'}",
+        f"Fecha:      {fecha}",
+        "",
+        "No cuenta como ingreso; compensa los gastos que ya ahorraste.",
+    ]
+    return "\n".join(lineas)
+
+
+def _retirada_confirm_kb(pid: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([[
+        InlineKeyboardButton("Guardar", callback_data=f"ok:{pid}"),
+        InlineKeyboardButton("Cancelar", callback_data=f"no:{pid}"),
+    ]])
+
+
 async def handle_callback(update: Update, _ctx: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     if not _is_authorized(update):
         return await query.edit_message_text("No autorizado.")
 
-    action, pid = query.data.split(":", 1)
+    action, rest = query.data.split(":", 1)
 
-    # Correccion rapida: marcar como retirada de hucha sin guardar aun
+    # Correccion rapida: marcar como retirada de hucha (no guarda todavia)
     if action == "ret_hucha":
+        pid = rest
         data = pending.get(pid)
         if not data:
             return await query.edit_message_text("Este mensaje ha caducado. Envialo de nuevo.")
         data["categoria"] = "Retirada de hucha"
-        data["tipo"] = "INGRESO"
-        # Devolver el pending con la nueva categoria y mostrar confirmacion actualizada
-        fecha = data["fecha"].strftime("%d/%m/%Y") if isinstance(data["fecha"], datetime.date) else data["fecha"]
-        lineas = [
-            "Categoria corregida. Voy a anotar:",
-            "",
-            f"Tipo:       + INGRESO",
-            f"Importe:    {_fmt_eur(data['importe'])}",
-            f"Categoria:  Retirada de hucha",
-            f"Descripcion: {data['descripcion'] or '(vacio)'}",
-            f"Metodo:     {data['metodo_pago']}",
-            f"Fecha:      {fecha}",
-        ]
-        if data.get("hucha"):
-            lineas.append(f"Hucha:      {data['hucha']}")
-        else:
-            lineas.append("Hucha:      (no detectada - se guardara sin hucha)")
-        kb = [[
-            InlineKeyboardButton("Guardar", callback_data=f"ok:{pid}"),
-            InlineKeyboardButton("Cancelar", callback_data=f"no:{pid}"),
-        ]]
-        return await query.edit_message_text("\n".join(lineas), reply_markup=InlineKeyboardMarkup(kb))
+        data["tipo"] = "GASTO"
+        if not data.get("hucha"):
+            # No se detecto la hucha: pedir al usuario que la elija.
+            return await query.edit_message_text(
+                "De que hucha sale el dinero?", reply_markup=_ask_hucha_kb(pid)
+            )
+        return await query.edit_message_text(
+            _retirada_confirm_text(data), reply_markup=_retirada_confirm_kb(pid)
+        )
 
+    # El usuario elige la hucha de la lista
+    if action == "set_hucha":
+        pid, idx = rest.split(":", 1)
+        data = pending.get(pid)
+        if not data:
+            return await query.edit_message_text("Este mensaje ha caducado. Envialo de nuevo.")
+        try:
+            data["hucha"] = config.HUCHAS[int(idx)]
+        except (ValueError, IndexError):
+            data["hucha"] = ""
+        return await query.edit_message_text(
+            _retirada_confirm_text(data), reply_markup=_retirada_confirm_kb(pid)
+        )
+
+    pid = rest
     data = pending.pop(pid, None)
     if not data:
         return await query.edit_message_text("Este mensaje ha caducado. Envialo de nuevo.")

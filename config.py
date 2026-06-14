@@ -47,8 +47,7 @@ MODEL_VISION = os.getenv("MODEL_VISION", "gpt-4o")
 CAT_INGRESOS = [
     "Nomina", "Freelance/Consultoria", "Alquiler cobrado", "Dividendos",
     "Venta de activo", "Devolucion/Reembolso", "Bono/Extra",
-    "Regalo recibido", "Otros ingresos",
-    "Retirada de hucha",   # retiro de dinero ahorrado en una hucha (no es ingreso real)
+    "Regalo recibido", "Otros ingresos"
 ]
 CAT_GASTOS = [
     "Vivienda (alquiler/hipoteca)", "Suministros (luz/agua/gas)",
@@ -58,8 +57,12 @@ CAT_GASTOS = [
     "Educacion/Formacion", "Ocio/Entretenimiento", "Viajes/Vacaciones",
     "Regalos dados", "Seguros", "Hogar (muebles/electrodomesticos)",
     "Mantenimiento/Reparaciones", "Ahorro aportado", "Inversion aportada",
+    "Retirada de hucha",   # gasto especial: se guarda con importe NEGATIVO (resta de la hucha)
     "Otros gastos"
 ]
+# Lista completa de categorias (para el desplegable de validacion de la columna C)
+ALL_CATS = CAT_INGRESOS + CAT_GASTOS
+
 METODOS_PAGO = [
     "Efectivo", "Tarjeta debito", "Tarjeta credito",
     "Transferencia", "Bizum", "Domiciliacion"
