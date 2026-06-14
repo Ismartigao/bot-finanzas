@@ -59,8 +59,8 @@ negativo despues). El campo hucha debe ser el nombre EXACTO de la lista de hucha
 validas que mas se parezca al mencionado (p.ej. "vacaciones"->"Vacaciones", \
 "emergencia"/"fondo de emergencia"->"Fondo de emergencia", "coche"->"Coche", \
 "navidad"->"Navidad", "formacion"->"Formacion"). \
-EJEMPLO: "saque 120 de la hucha de vacaciones" -> {"tipo":"GASTO", \
-"categoria":"Retirada de hucha","hucha":"Vacaciones","importe":120}. \
+EJEMPLO: "saque 120 de la hucha de vacaciones" -> tipo=GASTO, \
+categoria=Retirada de hucha, hucha=Vacaciones, importe=120. \
 Esta regla tiene PRIORIDAD: NUNCA marques una retirada de hucha como INGRESO.
 6. Si el usuario dice "invertir" o "aportar a la cartera" -> categoria "Inversion aportada".
 7. Si el texto menciona "cobro", "nomina", "sueldo", "me han pagado" -> tipo INGRESO.
